@@ -7,3 +7,4 @@ Step 4) Within the 'Tests' folder create a new folder called 'pipeline_test' and
 Step 5) Open VS code and click 'Add folder to workspace', in which you will select the 'Tests' folder.
 Step 6) Now you should have all the excel files and python files there.
 Step 7) Now you can just simply execute 'Pytest' in the terminal to run the unit tests.
+Step 8) I had to use 'sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))' to make my functions import properly from my pipeline so if youre having issues importing the functions try getting rid of that line 
