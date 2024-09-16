@@ -71,13 +71,13 @@ This function fills missing values in crime data and creates a column for city n
 '''
 
 def filling(df):
+    df['LSOA name'] = df['LSOA name'].fillna('no location 1234')
     df['CityName'] = df['LSOA name'].apply(remove_code)
     df['Crime ID'] = df['Crime ID'].fillna('a')
-    df['LSOA name'] = df['LSOA name'].fillna('no location 1234')
     df['Latitude'] = df['Latitude'].fillna(0)
     df['Longitude'] = df['Longitude'].fillna(0)
 
-    return df[['Crime ID','Month','Reported by','Crime type','Longitude','Latitude','LSOA name','Crime type','CityName']]
+    return df[['Crime ID','Month','Reported by','Crime type','Longitude','Latitude','LSOA name','CityName']]
 
 
 '''

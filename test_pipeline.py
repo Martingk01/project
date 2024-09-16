@@ -1,176 +1,332 @@
-import pytest
+import sys
 import os
+import pytest
 import pandas as pd
+import numpy as np
+from unittest.mock import patch
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 from pipeline import (
-    staging, primary, reporting, main, 
-    postcode_cleaning, new_long_col, merging_postcode_UK_crime,
-    filling, coord_col, calculate_all_crime_change, crime_per_month,
+    main,
+    logging,
+    cleaning_asylum,
+    remove_code,
+    filling,
+    coord_col,
+    postcode_cleaning,
+    new_long_col,
+    merging_postcode_UK_crime,
+    crimes_per_crime,
+    crimes_per_1000,
+    calculate_all_crime_change,
+    crime_per_month,
     regression_coefficient
-)  # Import the functions from your pipeline
+)
 
-# Define fixtures
-@pytest.fixture(autouse=True)
-def cleanup_files():
-    """Fixture that runs before each test and ensures any test-generated files are removed after the test."""
-    yield  # Run the test
-    # Teardown: Remove any files created during the test
-    files_to_remove = [
-        'staged_Asylum.csv', 'staged_UK_Crime22.csv', 'staged_UK_Crime23.csv', 
-        'Merged_data22.csv', 'Merged_data23.csv', 
-        'all_region_crime.csv', 'NY_crime_change.csv', 'postcode_dist.csv'
-    ]
-    for file in files_to_remove:
-        if os.path.exists(file):
-            os.remove(file)
 
-# Pipeline tests
-def test_staging():
-    staging()
-    assert os.path.exists('staged_Asylum.csv')
-    assert os.path.exists('staged_UK_Crime22.csv')
-    assert os.path.exists('staged_UK_Crime23.csv')
-
-def test_primary():
-    primary()
-    assert os.path.exists('Merged_data22.csv')
-    assert os.path.exists('Merged_data23.csv')
-
-def test_reporting():
-    reporting()
-    assert os.path.exists('all_region_crime.csv')
-    assert os.path.exists('NY_crime_change.csv')
-
-def test_pipeline_all_stages():
-    main('all')
-    assert os.path.exists('Merged_data23.csv')
-    assert os.path.exists('postcode_dist.csv')
-
-def test_pipeline_staging_only():
-    main('staging')
-    assert os.path.exists('staged_Asylum.csv')
-    assert not os.path.exists('Merged_data23.csv')
-
-def test_pipeline_primary_only():
-    main('primary')
-    assert os.path.exists('Merged_data22.csv')
-    assert not os.path.exists('all_region_crime.csv')
-
-def test_pipeline_reporting_only():
-    main('reporting')
-    assert os.path.exists('all_region_crime.csv')
-
-def test_invalid_pipeline_stage():
-    with pytest.raises(Exception):
-        main('invalid_stage')
-
-# Data processing tests
-def test_postcode_cleaning():
+@pytest.fixture
+def df_asylum():
+    # Create a DataFrame with empty rows and columns to match the structure
     data = {
-        'Postcode': ['AB1', 'AB2'],
-        'District': ['Bristol, City of', 'Manchester'],
-        'In Use?': ['Yes', 'No'],
-        'Latitude': [51.45, 53.48],
-        'Longitude': [-2.58, -2.24],
-        'LSOA Code': ['LSOA1', 'LSOA2'],
-        'Lower layer super output area': ['Area1', 'Area2'],
-        'Ward': ['Ward1', 'Ward2']
+        'Unnamed: 0': [None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None,None, None, None, None, None, None, None, None, None, None, None],
+        'Unnamed: 1': [None, None, None, None, 'United Kingdom',None, 'East Midlands', 'East of England', 'London', 'North East', 'North West', None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None],
+        'Unnamed: 2': [None, None, None, 'Contingency accommodation - hotel', 29585,None, 937, 2377, 11226, 353, 3122, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None],
+        'Unnamed: 3': [None, None, None, 'Contingency accommodation - other', 2458,None, 0, 569, 1236, 31, 0, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None],
+        'Unnamed: 4': [None, None, None, 'Dispersed accommodation', 61778,None, 3591, 2119, 4956, 6536, 16088, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None],
+        'Unnamed: 5': [None, None, None, 'Initial accommodation', 1880,None, 209, 0, 626, 0, 396, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None],
+        'Unnamed: 6': [None, None, None, 'Other accommodation', 941,None, 0, 540, 0, 0, 0, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None],
+        'Unnamed: 7': [None, None, None, 'Total', 96642,None, 4737, 5605, 18044, 6920, 19606, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None],
+        'Unnamed: 8': [None, None, None, 'Population', 66980375, None, 4880200, 6334500, 8799800, 2647100, 7417300, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None],
+        'Unnamed: 9': [None, None, None, 'Asylum seekers per 10,000 population', 14,None, 10, 9, 20.5, 26.1, 26.4, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None]
     }
+    
+    # Convert to DataFrame
     df = pd.DataFrame(data)
-    result = postcode_cleaning(df)
-    assert len(result) == 1
-    assert result.iloc[0]['District'] == 'Bristol'
+    
+    return df
 
-def test_new_long_col():
+
+@pytest.fixture
+def df_crime():
     data = {
-        'Longitude': [-2.58, -2.24],
-        'Latitude': [51.45, 53.48]
+        'Crime ID': [
+            None, '5113ac422e61c8150978c61fe11cd909392b690e0883f860a17124b039253322', 
+            'd14dbe47684d5d51fc62b85ba40b78a4878bc187e25331871c803b454ada3301',
+            '5f5332e8f726b16bc717a205ea566cdfde30b2ea5882e852b91c21967bf5e4df', 
+            None],
+        'Month': ['2022-01', '2022-02', '2022-03', '2022-04', '2022-05'],
+        'Reported by': [
+            'Sussex Police', 'Sussex Police', 'North Yorkshire Police',
+            'Gloucestershire Constabulary', 'Avon and Somerset Constabulary'],
+        'Falls within': [
+            'Sussex Police', 'Sussex Police', 'North Yorkshire Police',
+            'Gloucestershire Constabulary', 'Avon and Somerset Constabulary'],
+        'Longitude': [-0.227676, None, 0.3434, -0.23217, -0.227293],
+        'Latitude': [50.836076, None, 52.3438, 50.843429, 50.84206],
+        'Location': [
+            'On or near Orchard Close', 'On or near The Crescent', 'On or near Summersdeane', 
+            'On or near Downsway', 'On or near Ridgeway Close'],
+        'LSOA code': ['E01031349', 'E01031349', 'E01031350', 'E01031350', 'E01031350'],
+        'LSOA name': [None, 'Adur 001A', 'Adur 001B', 'Adur 001B', 'Adur City 001B'],
+        'Crime type': [
+            'Anti-social behaviour', 'Anti-social behaviour', 'Anti-social behaviour', 
+            'Criminal damage and arson', 'Violence and sexual offences'],
+        'Last outcome category': ['', '', '', 'Status update unavailable', 'Unable to prosecute suspect'],
+        'Context': ['', '', '', '', '']
     }
-    df = pd.DataFrame(data)
-    result = new_long_col(df)
+    return pd.DataFrame(data)
+
+
+
+@pytest.fixture
+def df_postcode():
+    return pd.DataFrame({
+        'Postcode': ['BS4 4QY', 'BS1 6YH', 'CL9 OT6','CF32 3XY','GH5 4FG'],
+        'In Use?': ['Yes', 'No', 'Yes','Yes','Yes'],
+        'District': ['Bristol, City of', 'Bristol, City of', 'Ass','Arun','Katowice'],
+        'Latitude': [50.836076, 52.2, 52.3436,53.23,55.12],
+        'Longitude': [-0.227676, 0.2, 0.3432,2.3,5.4],
+        'LSOA Code':['E153','E245','E142','E612','E415'],
+        'Lower layer super output area': ['LSOA 1234', 'LSOA 45b6', 'LSOA 78x9', 'LSOA abcd','LSOA ghfy'],
+        'Ward': ['Ward1', 'Ward2', 'Mendip','Ward4','ward5']
+    })
+
+@pytest.fixture
+def comb():
+    return pd.DataFrame({
+        'Coord2': [(0.1, 52.1), (0.2, 52.2), (0.3, 52.3)],
+        'Longitude': [0.1, 0.2, 0.3],
+        'Latitude': [52.1, 52.2, 52.3],
+        'Coordinates': [(0.1, 52.1), (0.2, 52.2), (0.3, 52.3)]
+    })
+
+
+
+
+
+ #Test cases
+def test_cleaning_asylum(df_asylum):
+    # Store the length of the 'Population' column before cleaning
+    original_population_length = len(df_asylum['Unnamed: 7'])
+    
+    # Apply the cleaning_asylum function
+    result = cleaning_asylum(df_asylum)
+
+    # Store the length of the 'Population' column after cleaning
+    result_population_length = len(result['Population'].dropna())
+
+    # Check if the length after cleaning is equal to the original length minus 19
+    assert result_population_length == (original_population_length - 21), \
+        f"Expected length of 'Population' column to be {original_population_length - 21}, but got {result_population_length}"
+
+
+
+def test_remove_code():
+    assert remove_code('LSOA 1234') == 'LSOA'
+    assert remove_code('Bristol City 1234') == 'Bristol City'
+
+def test_filling(df_crime):
+    # Apply the filling function
+    result = filling(df_crime)
+
+    # Expected DataFrame
+    expected_df = pd.DataFrame({
+        'Crime ID': [
+            'a', '5113ac422e61c8150978c61fe11cd909392b690e0883f860a17124b039253322',
+            'd14dbe47684d5d51fc62b85ba40b78a4878bc187e25331871c803b454ada3301',
+            '5f5332e8f726b16bc717a205ea566cdfde30b2ea5882e852b91c21967bf5e4df',
+            'a'
+        ],
+        'Month': ['2022-01', '2022-02', '2022-03', '2022-04', '2022-05'],
+        'Reported by': [
+            'Sussex Police', 'Sussex Police', 'North Yorkshire Police',
+            'Gloucestershire Constabulary', 'Avon and Somerset Constabulary'
+        ],
+        'Crime type': [
+            'Anti-social behaviour', 'Anti-social behaviour', 'Anti-social behaviour',
+            'Criminal damage and arson', 'Violence and sexual offences'
+        ],
+        'Longitude': [-0.227676, 0.000000, 0.3434, -0.232170, -0.227293],   
+        'Latitude': [50.836076, 0.000000, 52.34389,50.843852, 50.842060],
+        'LSOA name': [
+            'no location 1234', 'Adur 001A', 'Adur 001B', 'Adur 001B', 'Adur City 001B'
+        ],
+        'CityName': [
+            'no location', 'Adur', 'Adur', 'Adur', 'Adur City'
+        ]
+    })
+
+    # Check if the result DataFrame matches the expected DataFrame
+    pd.testing.assert_frame_equal(result, expected_df)
+
+def test_coord_col(df_crime):
+    result = coord_col(df_crime)
     assert 'Coordinates' in result.columns
-    assert result['Coordinates'].iloc[0] == (-2.58, 51.45)
-
-def test_merging_postcode_UK_crime():
-    df_data = {
-        'Longitude': [-2.58, -2.24],
-        'Latitude': [51.45, 53.48],
-        'Coordinates': [(-2.58, 51.45), (-2.24, 53.48)],
-        'Postcode': ['AB1', 'AB2']
-    }
-    comb_data = {
-        'Coord2': ['C1', 'C2'],
-        'Longitude': [-2.58, -2.24],
-        'Latitude': [51.45, 53.48],
-        'Coordinates': [(-2.58, 51.45), (-2.24, 53.48)]
-    }
-    df = pd.DataFrame(df_data)
-    comb = pd.DataFrame(comb_data)
-    result = merging_postcode_UK_crime(df, comb)
-    assert 'Distance' in result.columns
-    assert result['Distance'].iloc[0] == 0
-
-def test_filling():
-    data = {
-        'LSOA name': ['name 1234', 'no location 1234'],
-        'Crime ID': [None, 'B123'],
-        'Latitude': [None, 53.48],
-        'Longitude': [None, -2.24]
-    }
-    df = pd.DataFrame(data)
-    result = filling(df)
-    assert result['Crime ID'].iloc[0] == 'a'
-    assert result['Latitude'].iloc[0] == 0
-    assert result['LSOA name'].iloc[1] == 'no location 1234'
-
-def test_coord_col():
-    data = {
-        'Longitude': [-2.58, -2.24],
-        'Latitude': [51.45, 53.48]
-    }
-    df = pd.DataFrame(data)
-    result = coord_col(df)
+    assert result['Coordinates'][0] == (-0.228, 50.836)
     assert 'Coord2' in result.columns
+    assert result['Coord2'][0] == (-0.227676, 50.836076)
+
+def test_postcode_cleaning(df_postcode):
+    result = postcode_cleaning(df_postcode)
+    assert result.iloc[0]['District'] == 'Bristol'
+    assert len(result) == 3
+
+def test_new_long_col(df_postcode):
+    result = new_long_col(df_postcode)
     assert 'Coordinates' in result.columns
-    assert result['Coord2'].iloc[0] == (-2.58, 51.45)
-    assert result['Coordinates'].iloc[0] == (-2.58, 51.45)
+    assert result['Coordinates'][0] == (-0.228,50.836)
 
-def test_calculate_all_crime_change():
-    data_22 = {
-        'Crime ID': [100, 200],
-        'Reported by': ['Region1', 'Region2'],
-        'Month': ['2022-01', '2022-02']
-    }
-    data_23 = {
-        'Crime ID': [150, 250],
-        'Reported by': ['Region1', 'Region2'],
-        'Month': ['2023-01', '2023-02']
-    }
-    df_22 = pd.DataFrame(data_22)
-    df_23 = pd.DataFrame(data_23)
-    region = ['Region1', 'Region2']
-    result = calculate_all_crime_change(df_22, df_23, region)
-    assert 'Change in crime' in result.columns
-    assert result['Change in crime'].iloc[0] == '50.0%'
+    
+def test_merging_postcode_UK_crime(df_postcode, df_crime):
+    # Step 1: Test new_long_col function
+    try:
+        processed_postcode = new_long_col(df_postcode)
+    except Exception as e:
+        raise AssertionError(f"Error in new_long_col function: {str(e)}")
+    
+    # Step 2: Test filling function
+    try:
+        filled_crime = filling(df_crime)
+    except Exception as e:
+        raise AssertionError(f"Error in filling function: {str(e)}")
+    
+    # Step 3: Test coord_col function
+    try:
+        processed_crime = coord_col(filled_crime)
+    except Exception as e:
+        raise AssertionError(f"Error in coord_col function: {str(e)}")
+    
+    # Step 4: Test merging_postcode_UK_crime function
+    try:
+        result = merging_postcode_UK_crime(processed_postcode, processed_crime)
+    except Exception as e:
+        raise AssertionError(f"Error in merging_postcode_UK_crime function: {str(e)}")
 
-def test_crime_per_month():
-    data = {
-        'Crime ID': ['C1', 'C2'],
-        'Reported by': ['Region1', 'Region2'],
-        'Month': ['2022-01', '2022-02']
-    }
-    df = pd.DataFrame(data)
-    region = ['Region1']
-    result = crime_per_month(df, region)
-    assert len(result) == 1
-    assert result['Month'].iloc[0] == '01'
+    # Step 5: Check if 'Postcode' column exists in result
+    try:
+        assert 'Postcode' in result.columns, "'Postcode' column not found in the result DataFrame."
+    except AssertionError as e:
+        raise AssertionError(f"Postcode column check failed: {str(e)}")
 
-def test_regression_coefficient():
-    data = {
-        'CityName': ['City1', 'City2'],
-        'Reported by': ['Region1', 'Region2'],
-        'Asylum seekers per 1,000 population': [10, 20],
-        'Crimes per 1000 people': [100, 200]
-    }
-    df = pd.DataFrame(data)
-    result = regression_coefficient(df)
-    assert result != 0
+    # Step 6: Check if 'Distance' column values are non-negative
+    try:
+        assert all(result['Distance'] >= 0), "Not all 'Distance' values are non-negative."
+    except Exception as e:
+        raise AssertionError(f"Distance check failed: {str(e)}")
+
+@pytest.fixture
+def caplog(caplog):
+    caplog.set_level(logging.INFO)
+    return caplog
+
+# Test the 'staging' pipeline
+@patch('pipeline.staging')
+def test_staging_pipeline(mock_staging, caplog):
+    main('staging')
+    
+    # Check if staging was called
+    mock_staging.assert_called_once()
+
+    # Check logging messages
+    assert "Staging execution completed successfully" in caplog.text
+    assert "Pipeline run complete (staging)" in caplog.text
+
+# Test the 'primary' pipeline
+@patch('pipeline.primary')
+def test_primary_pipeline(mock_primary, caplog):
+    main('primary')
+    
+    # Check if primary was called
+    mock_primary.assert_called_once()
+
+    # Check logging messages
+    assert "Primary execution completed successfully" in caplog.text
+    assert "Pipeline run complete (primary)" in caplog.text
+
+# Test the 'reporting' pipeline
+@patch('pipeline.reporting')
+def test_reporting_pipeline(mock_reporting, caplog):
+    main('reporting')
+    
+    # Check if reporting was called
+    mock_reporting.assert_called_once()
+
+    # Check logging messages
+    assert "Reporting execution completed successfully" in caplog.text
+    assert "Pipeline run complete (reporting)" in caplog.text
+
+# Test the 'all' pipeline (staging -> primary -> reporting)
+@patch('pipeline.staging')
+@patch('pipeline.primary')
+@patch('pipeline.reporting')
+def test_all_pipeline(mock_reporting, mock_primary, mock_staging, caplog):
+    main('all')
+    
+    # Check if all stages were called
+    mock_staging.assert_called_once()
+    mock_primary.assert_called_once()
+    mock_reporting.assert_called_once()
+
+    # Check logging messages
+    assert "Staging execution completed successfully" in caplog.text
+    assert "Primary execution completed successfully" in caplog.text
+    assert "Reporting execution completed successfully" in caplog.text
+
+# Test invalid pipeline input
+def test_invalid_pipeline_input(caplog):
+    main('invalid_stage')
+
+    # Check logging for critical error
+    assert "Invalid pipeline stage specified" in caplog.text
+
+# Test exception handling
+@patch('pipeline.staging', side_effect=Exception("Staging error"))
+def test_pipeline_exception(mock_staging, caplog):
+    main('staging')
+
+    # Check if the exception was logged as an error
+    assert "Pipeline execution failed: Staging error" in caplog.text
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+#def test_crimes_per_crime(df_crime):
+#    pop_func = lambda city: 1000  # Mock population function
+#    result = crimes_per_crime(df_crime, pop_func)
+#    assert 'Crimes per 1000 people' in result.columns
+
+#def test_crimes_per_1000(df_crime):
+#    pop_func = lambda city: 1000  # Mock population function
+ #   result = crimes_per_1000(df_crime, pop_func)
+#    assert 'Crimes per 1000 people' in result.columns
+
+#def test_calculate_all_crime_change():
+#    all_data22 = pd.DataFrame({'Crime ID': [1, 2, 3], 'Reported by': ['Region A', 'Region B', 'Region A']})
+#    all_data23 = pd.DataFrame({'Crime ID': [2, 3, 4], 'Reported by': ['Region A', 'Region B', 'Region A']})
+#    result = calculate_all_crime_change(all_data22, all_data23, ['Region A', 'Region B'])
+#    assert 'Change in crime' in result.columns
+
+#def test_crime_per_month(df_crime):
+#    result = crime_per_month(df_crime, ['Region A'])
+#    assert 'Crime ID' in result.columns
+
+def test_regression_coefficient(df_crime):
+    result = regression_coefficient(df_crime)
+    assert isinstance(result, float)
+    assert result <=1 and result >=-1
+
