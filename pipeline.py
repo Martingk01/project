@@ -19,9 +19,9 @@ import logging
 This function cleans and processes the asylum seekers data, adjusting for format inconsistencies and calculating asylum seekers per 1,000 population.
 '''
 
-def cleaning_asylum(df):
+def cleaning_asylum(asylum_data):
     # 1. Drop the first column named 'Unnamed: 0'
-    df = df.drop(columns=['Unnamed: 0'])
+    df = asylum_data.drop(columns=['Unnamed: 0'])
     
     # 2. Remove the first 3 rows
     df = df.iloc[3:].reset_index(drop=True)
@@ -57,8 +57,8 @@ def cleaning_asylum(df):
 '''
 This function cleans LSOA names by removing the code part of the name.
 '''
-def remove_code(x):
-    x = str(x)
+def remove_code(crime_data):
+    x = str(crime_data)
     if ' ' in x:
         return ' '.join(x.split()[:-1])
     else:
@@ -70,34 +70,34 @@ def remove_code(x):
 This function fills missing values in crime data and creates a column for city names based on LSOA names.
 '''
 
-def filling(df):
-    df['LSOA name'] = df['LSOA name'].fillna('no location 1234')
-    df['CityName'] = df['LSOA name'].apply(remove_code)
-    df['Crime ID'] = df['Crime ID'].fillna('a')
-    df['Latitude'] = df['Latitude'].fillna(0)
-    df['Longitude'] = df['Longitude'].fillna(0)
+def filling(crime_data):
+    crime_data['LSOA name'] = crime_data['LSOA name'].fillna('no location 1234')
+    crime_data['CityName'] = crime_data['LSOA name'].apply(remove_code)
+    crime_data['Crime ID'] = crime_data['Crime ID'].fillna('a')
+    crime_data['Latitude'] = crime_data['Latitude'].fillna(0)
+    crime_data['Longitude'] = crime_data['Longitude'].fillna(0)
 
-    return df[['Crime ID','Month','Reported by','Crime type','Longitude','Latitude','LSOA name','CityName']]
+    return crime_data[['Crime ID','Month','Reported by','Crime type','Longitude','Latitude','LSOA name','CityName']]
 
 
 '''
 This function creates new columns for coordinates rounded to 3 decimal places.
 '''
 
-def coord_col(df):
+def coord_col(crime_data):
     
-    df['Coord2'] = list(zip(df['Longitude'], df['Latitude']))
-    df['Coordinates'] = list(zip(df['Longitude'].apply(lambda x: round((x),3)), df['Latitude'].apply(lambda x: round((x),3))))
+    crime_data['Coord2'] = list(zip(crime_data['Longitude'], crime_data['Latitude']))
+    crime_data['Coordinates'] = list(zip(crime_data['Longitude'].apply(lambda x: round((x),3)), crime_data['Latitude'].apply(lambda x: round((x),3))))
     
-    return df
+    return crime_data
 
 '''
 This function cleans and filters postcode data based on its usage and relevance to specific cities or wards.
 '''
 
-def postcode_cleaning(df):
+def postcode_cleaning(postcode_data):
     
-    df = df[df['In Use?'] == 'Yes']
+    df = postcode_data[postcode_data['In Use?'] == 'Yes']
     df = df[['Postcode','District','Latitude','Longitude','LSOA Code','Lower layer super output area','Ward']]
     df = df[df['District'].isin(cities) | df['Ward'].isin(wrd)]
     # Rename 'Bristol, City of' to 'Bristol' in the 'District' column
@@ -110,20 +110,20 @@ def postcode_cleaning(df):
 This function creates a new column with coordinates rounded to 3 decimal places.
 '''
 
-def new_long_col(df):
-    # Create a new column 'Longitude_100' by multiplying the 'Longitude' column by 100
-    df['Coordinates'] = list(zip(df['Longitude'].apply(lambda x: round((x),3)), df['Latitude'].apply(lambda x: round((x),3))))
+def new_long_col(postcode_data):
+    # Create a new column coordinates which contains the longitude and latitude round to 3 decimal places
+    postcode_data['Coordinates'] = list(zip(postcode_data['Longitude'].apply(lambda x: round((x),3)), postcode_data['Latitude'].apply(lambda x: round((x),3))))
 
-    return df
+    return postcode_data
 
 '''
 This function merges postcode data with crime data based on coordinates and calculates the distance between them.
 '''
 
-def merging_postcode_UK_crime(df,comb):
+def merging_postcode_UK_crime(postcode_data,crime_data):
 
-    df = df[['Longitude','Latitude','Coordinates','Postcode']]
-    comb = comb[['Coord2','Longitude','Latitude','Coordinates']]
+    df = postcode_data[['Longitude','Latitude','Coordinates','Postcode']]
+    comb = crime_data[['Coord2','Longitude','Latitude','Coordinates']]
     
     # Perform the merge on the 'Longitude_100' column in both dataframes
     
@@ -151,9 +151,9 @@ def merging_postcode_UK_crime(df,comb):
 This function calculates the number of crimes per 1,000 people for specified crime types.
 '''
 
-def crimes_per_crime(x, pop_func):
+def crimes_per_crime(crime_data, pop_func):
     # Filter out rows where CityName is 'no location'
-    b = x[x['CityName'] != 'no location']
+    b = crime_data[crime_data['CityName'] != 'no location']
     
     # Filter rows where Crime type is 'Burglary', 'Drugs', or 'Violent crime'
     crime_types = ['Burglary', 'Drugs', 'Violence and sexual offences']
@@ -182,8 +182,8 @@ def crimes_per_crime(x, pop_func):
 This function calculates the number of crimes per 1,000 people, taking asylum seekers into account.
 '''
 
-def crimes_per_1000(x,pop_func):
-    b = x[x['CityName'] != 'no location']
+def crimes_per_1000(crime_data,pop_func):
+    b = crime_data[crime_data['CityName'] != 'no location']
     b = b.groupby(['CityName', 'Reported by','Asylum seekers per 1,000 population']).agg({'Crime type': 'count', 'Latitude': 'mean', 'Longitude': 'mean'}).sort_values(by='Crime type', ascending=False).reset_index()
     b['Population_2023'] = b['CityName'].apply(pop_func).astype(float)
     b['Crimes per 1000 people'] = round(((b['Crime type'] / b['Population_2023']) * 1000),0)
@@ -236,8 +236,8 @@ def calculate_all_crime_change(all_data22,all_data23,region):
 This function counts the number of crimes per month for a specific region.
 '''
 
-def crime_per_month(y,region):
-    y = y[y['Reported by'].isin(region)]
+def crime_per_month(crime_data,region):
+    y = crime_data[crime_data['Reported by'].isin(region)]
 
     #y = y[y['Reported by'] == region]
     a = y.groupby(['Month'])[['Crime ID']].count().reset_index()
@@ -252,7 +252,7 @@ This function calculates the correlation between asylum seekers per 1,000 popula
 '''
 
 def regression_coefficient(x):
-    x = crimes_per_1000(x,City_pop_a23)[['CityName','Reported by','Asylum seekers per 1,000 population','Crimes per 1000 people']]
+    x = crimes_per_1000(x,City_pop)[['CityName','Reported by','Asylum seekers per 1,000 population','Crimes per 1000 people']]
     
     x['Asylum seekers per 1,000 population'] = x['Asylum seekers per 1,000 population'].astype(float).round().astype(int)
     
@@ -263,12 +263,12 @@ def regression_coefficient(x):
     return (correlation)
 
 # %%
-'''Created dictionaries for each city in each region and a month dictionary
+'''Created dictionaries for each city in each region with their population so that I can calulate crimes per 1000 people and a month dictionary to be able 
 '''
 
 
 
-def City_pop_a23(x):
+def City_pop(x):
     pop_dict = { 'Bristol' : '483000',
                  'South Gloucestershire' : '290400',
                  'North Somerset' : '219544',
@@ -485,15 +485,15 @@ def staging():
         logging.info("Postcode data cleaned successfully.")  # Log successful completion of postcode data cleaning
 
         # Load the raw Asylum Seekers data from Excel
-        df = pd.read_excel(RAW_Asylum)  # Read the asylum seekers data from Excel file
+        asylum = pd.read_excel(RAW_Asylum)  # Read the asylum seekers data from Excel file
         logging.info("Asylum seekers data loaded successfully.")  # Log successful loading of asylum seekers data
 
         # Clean the Asylum Seekers data
-        df = cleaning_asylum(df)  # Apply cleaning function to the asylum seekers data
+        asylum = cleaning_asylum(asylum)  # Apply cleaning function to the asylum seekers data
         logging.info("Asylum seekers data cleaned successfully.")  # Log successful cleaning of asylum seekers data
 
         # Save the cleaned datasets to CSV files
-        df.to_csv(STAGED_Asylum, index=False)  # Save the cleaned asylum seekers data to CSV
+        asylum.to_csv(STAGED_Asylum, index=False)  # Save the cleaned asylum seekers data to CSV
         UK_crime22.to_csv(STAGED_UK_Crime22, index=False)  # Save the cleaned UK crime data for 2022 to CSV
         UK_crime23.to_csv(STAGED_UK_Crime23, index=False)  # Save the cleaned UK crime data for 2023 to CSV
         postcode.to_csv(STAGED_postcode, index=False)  # Save the cleaned postcode data to CSV
@@ -531,14 +531,14 @@ def primary():
         crime_postcode_merge22 = UK_crime22.merge(crime_postcode_merge22, on='Coord2', how='left')
         crime_postcode_merge23 = UK_crime23.merge(crime_postcode_merge23, on='Coord2', how='left')
 
-        crime_postcode_merge22 = crime_postcode_merge22.merge(asylum, on='CityName', how='left')
-        crime_postcode_merge23 = crime_postcode_merge23.merge(asylum, on='CityName', how='left')
+        crime_postcode_asylum_merge22 = crime_postcode_merge22.merge(asylum, on='CityName', how='left')
+        crime_postcode_asylum_merge23 = crime_postcode_merge23.merge(asylum, on='CityName', how='left')
 
         logging.info("Datasets merged successfully.")
         
         # Save merged data
-        crime_postcode_merge22.to_csv(MERGED_data22, index=False)
-        crime_postcode_merge23.to_csv(MERGED_data23, index=False)
+        crime_postcode_asylum_merge22.to_csv(MERGED_data22, index=False)
+        crime_postcode_asylum_merge23.to_csv(MERGED_data23, index=False)
         
         logging.info("Primary layer data saved successfully.")
     except Exception as e:
@@ -564,8 +564,8 @@ def reporting():
 
         logging.info("Crime change calculations completed.")
 
-        crime_dist_23 = crimes_per_crime(all_data23, City_pop_a23)
-        crimes_1000_23 = crimes_per_1000(all_data23, City_pop_a23)
+        crime_dist_23 = crimes_per_crime(all_data23, City_pop)
+        crimes_1000_23 = crimes_per_1000(all_data23, City_pop)
 
         logging.info("Crime distribution and per-1000 stats calculated.")
 
